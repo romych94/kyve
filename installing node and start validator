@@ -1,0 +1,109 @@
+*Start of node installation: Setting variables:*
+MONIKER="moniker"
+WALLET="moniker_wallet"
+CHAIN="kaon-1"
+
+*Exporting variables:*
+echo "export MONIKER=$MONIKER" >> $HOME/.bash_profile && \
+echo "export WALLET=$WALLET" >> $HOME/.bash_profile && \
+echo "export CHAIN=$CHAIN" >> $HOME/.bash_profile && \
+source $HOME/.bash_profile
+
+*Installing binary files:*
+cd $HOME
+rm -rf ~/chain
+git clone https://github.com/KYVENetwork/chain.git
+cd chain
+git fetch
+git checkout v1.0.0-rc0
+make install
+kyved version
+
+*Initialization node:*
+kyved config chain-id $CHAIN
+kyved config keyring-backend test
+kyved init $MONIKER --chain-id $CHAIN
+
+*Download genesis and addressbook:*
+curl -s https://raw.githubusercontent.com/KYVENetwork/networks/main/kaon-1/genesis.json > $HOME/.kyve/config/genesis.json
+curl -s https://raw.githubusercontent.com/starnodes/KyveNetwork/main/addrbook.json > $HOME/.kyve/config/addrbook.json
+
+*Add sids and feasts:*
+SEEDS=""
+PEERS="7258cf2c1867cc5b997baa19ff4a3e13681f14f4@68.183.143.17:26656,e8c9a0f07bc34fb870daaaef0b3da54dbf9c5a3b@15.235.10.35:26656,801fa026c6d9227874eeaeba288eae3b800aad7f@52.29.15.250:26656,bc8b5fbb40a1b82dfba591035cb137278a21c57d@52.59.65.9:26656,430845649afaad0a817bdf36da63b6f93bbd8bd1@3.67.29.225:26656,b68e5131552e40b9ee70427879eb34e146ef20df@18.194.131.3:26656,78d76da232b5a9a5648baa20b7bd95d7c7b9d249@142.93.161.118:26656,97b5c38213e4a845c9a7449b11d811f149fa6710@65.109.85.170:56656,bbb7a427e04d38c74f574f6f0162e1359b66b330@93.115.25.18:39656,1dfe7262db2b9bf51c3b25030e01c89e62640bb1@65.109.71.35:26656,a01d20a3c64a25f5b9199b0273f95cb1471d2b47@65.108.237.231:28656,7820d73c4449e0e4328c9fc4437b00aef8de33c2@5.161.195.113:26656"
+sed -i -e "s/^seeds *=.*/seeds = \"$SEEDS\"/; s/^persistent_peers *=.*/persistent_peers = \"$PEERS\"/" $HOME/.kyve/config/config.toml
+
+*Setting up pruning:*
+pruning="custom"
+pruning_keep_recent="100"
+pruning_interval="10"
+sed -i.bak -e "s/^pruning *=.*/pruning = \"$pruning\"/" $HOME/.kyve/config/app.toml
+sed -i -e "s/^pruning-keep-recent *=.*/pruning-keep-recent = \"$pruning_keep_recent\"/" $HOME/.kyve/config/app.toml
+sed -i -e "s/^pruning-interval *=.*/pruning-interval = \"$pruning_interval\"/" $HOME/.kyve/config/app.toml
+
+*Turn off the indexer:*
+indexer="null" 
+sed -i.bak -e "s/^indexer *=.*/indexer = \"$indexer\"/" $HOME/.kyve/config/config.toml
+
+*Setting the minimum price for gas in app.toml*
+sed -i 's/minimum-gas-prices =.*/minimum-gas-prices = "0.0025tkyve"/g' $HOME/.kyve/config/app.toml
+
+*If its necessary, we increase the number of incoming and outgoing peers for connection. This may help when the node falls, but it will increase the load.*
+sed -i.bak 's/max_num_inbound_peers =.*/max_num_inbound_peers = 50/g' $HOME/.kyve/config/config.toml 
+sed -i.bak 's/max_num_outbound_peers =.*/max_num_outbound_peers = 50/g' $HOME/.kyve/config/config.toml
+
+*Reset the old database:*
+kyved tendermint unsafe-reset-all --home $HOME/.kyve --keep-addr-book
+
+*Creating a service file:*
+sudo tee /etc/systemd/system/kyved.service > /dev/null <<EOF
+[Unit]
+Description=kyved Node
+After=network.target
+
+[Service]
+User=$USER
+Type=simple
+ExecStart=$(which kyved) start
+Restart=on-failurerm
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+*We start the service and add it to autorun:*
+sudo systemctl daemon-reload
+sudo systemctl enable kyved
+sudo systemctl restart kyved && sudo journalctl -u kyved -f --no-hostname -o cat
+
+*Check the synchronization status:*
+kyved status 2>&1 | jq .SyncInfo
+
+*Restore a wallet from korellia by mnemonics:*
+kyved keys add $WALLET --recover
+
+*Add the validator and wallet address to the variables for convenience:*
+VALOPER=$(kyved keys show $WALLET --bech val -a) && \
+ADDRESS=$(kyved keys show $WALLET --address) && \
+echo "export VALOPER=$VALOPER" >> $HOME/.bash_profile && \
+echo "export ADDRESS=$ADDRESS" >> $HOME/.bash_profile && \
+source $HOME/.bash_profile
+
+*To create a validator, tokens will come automatically, but it is not yet known when. Check your wallet balance in Explorer*
+*Check your wallet balance:*
+kyved query bank balances $ADDRESS
+
+*Create a Validator:*
+kyved tx staking create-validator \
+  --amount=9900000tkyve \
+  --pubkey=$(kyved tendermint show-validator) \
+  --moniker=$MONIKER \
+  --chain-id=$CHAIN \
+  --commission-rate="0.10" \
+  --commission-max-rate="0.20" \
+  --commission-max-change-rate="0.05" \
+  --min-self-delegation=1000000 \
+  --fees=500tkyve \
+  --from=$WALLET \
+  -y
