@@ -1,0 +1,53 @@
+*Deleting Node:*
+sudo systemctl stop kyved
+sudo systemctl disable kyved
+sudo rm -rf /etc/systemd/system/kyved*
+sudo systemctl daemon-reload
+sudo rm $(which kyved)
+sudo rm -rf $HOME/.kyve
+sudo rm -fr $HOME/chain
+
+*Useful comands:*
+*Status node*
+
+# Node service logs
+journalctl -u kyved -f -o cat
+# Managing services
+systemctl status kyved
+systemctl stop kyved
+systemctl start kyved
+systemctl restart kyved
+# Check node status
+kyved status 2>&1 | jq
+
+*Wallets*
+
+# Get wallet adress
+echo $ADDRESS
+# Check wallet balance
+kyved q bank balances $ADDRESS
+# Send token 1 token = 1000000 (Cosmos)
+kyved tx bank send $WALLET <ADDRESS_TO> <TOKENS_COUNT>$TOKEN --fees 500$TOKEN
+# Delete wallet
+kyved keys delete $WALLET
+! If transactions are not sent with the error account sequence mismatch, expected 18, got 17: incorrect account sequence, then add the key -s 18 to the command (replace the number with the one waiting for the sequence)
+
+*Voting*
+
+# Vote
+kyved tx gov vote 1 yes --from $WALLET --fees 500$TOKEN -y
+# View the proposals where you voted
+kyved q gov proposals --voter $ADDRESS
+
+*Actions with the validator*
+
+# Get validator adress (valoper)
+echo $VALOPER
+# Change validator info
+kyved tx staking edit-validator --website="<YOUR_WEBSITE>" --details="<YOUR_DESCRIPTION>" --moniker="<YOUR_NEW_MONIKER>" --from=$WALLET --fees 500$TOKEN
+# Unjail
+kyved tx slashing unjail --from $WALLET --fees 500$TOKEN
+# Delegate to your validator
+kyved tx staking delegate $VALOPER <TOKENS_COUNT>$TOKEN --from $WALLET --fees 500$TOKEN -y
+# Reset validator, delete base and addrbook.json
+kyved tendermint unsafe-reset-all --home $HOME/.kyve
